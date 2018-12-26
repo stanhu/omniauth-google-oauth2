@@ -12,6 +12,7 @@ module OmniAuth
       BASE_SCOPES = %w[profile email openid].freeze
       DEFAULT_SCOPE = 'email,profile'
       USER_INFO_URL = 'https://www.googleapis.com/oauth2/v3/userinfo'.freeze
+      ALLOWED_ISSUERS = ['accounts.google.com', 'https://accounts.google.com'].freeze
 
       option :name, 'google_oauth2'
       option :skip_friends, true
@@ -60,9 +61,11 @@ module OmniAuth
         hash = {}
         hash[:id_token] = access_token['id_token']
         if !options[:skip_jwt] && !access_token['id_token'].nil?
-          hash[:id_info] = ::JWT.decode(
-            access_token['id_token'], nil, false, verify_iss: options.verify_iss,
-                                                  iss: 'accounts.google.com',
+          # Note only ruby-jwt v2.0+ supports multiple issuers:
+          # https://github.com/jwt/ruby-jwt/commit/ed3a6483b4e81314ca2e7168701a9d34afcb690d
+          decoded = ::JWT.decode(
+            access_token['id_token'], nil, false, verify_iss: false,
+                                                  iss: ALLOWED_ISSUERS,
                                                   verify_aud: true,
                                                   aud: options.client_id,
                                                   verify_sub: false,
@@ -72,6 +75,15 @@ module OmniAuth
                                                   verify_jti: false,
                                                   leeway: options[:jwt_leeway]
           ).first
+
+          # To maintain compatibility with ruby-jwt 1.5 and 2.0, manually check the issuer.
+          # Once ruby-jwt 2.0 is only supported, the verify_iss parameter can be used, and
+          # these lines can be removed.
+          if options.verify_iss
+            raise JWT::InvalidIssuerError unless ALLOWED_ISSUERS.include?(decoded['iss'])
+          end
+
+          hash[:id_info] = decoded
         end
         hash[:raw_info] = raw_info unless skip_info?
         prune! hash
